@@ -1,6 +1,9 @@
 <?php
 
+namespace Database\Seeders;
+
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class TermsTableSeeder extends Seeder
@@ -14,10 +17,10 @@ class TermsTableSeeder extends Seeder
     {
         $json_file = Storage::disk('local')->get('terms/terms.json');
         $arr_file = json_decode($json_file, true);
-        
-        foreach($arr_file as $type => $terms) {
+
+        foreach ($arr_file as $type => $terms) {
             $term_type_id = $type == 'disabled_functions' ? 1 : 2;
-            foreach($terms as $term) {
+            foreach ($terms as $term) {
                 DB::table('terms')->insert(
                     [
                         'term' => $term,
