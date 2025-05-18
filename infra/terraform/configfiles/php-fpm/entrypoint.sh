@@ -21,6 +21,10 @@ rm -rf /var/www/storage-init
 # -----------------------------------------------------------
 unset APP_KEY # Terraform tá injetando todos as variáveis do arquivo .env como variáveis de sistema, desse jeito o comando abaixo não estava atualizando o valor.
 php artisan key:generate
+php artisan migrate
+php artisan db:seed --class=UserTableSeeder
+php artisan db:seed --class=TermTypesTableSeeder
+php artisan db:seed --class=TermsTableSeeder
 
 # Clear and cache configurations
 # -----------------------------------------------------------
