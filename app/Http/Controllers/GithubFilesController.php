@@ -3,10 +3,14 @@
 namespace SegWeb\Http\Controllers;
 
 use Auth;
+use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
 use SegWeb\File;
 use SegWeb\FileResults;
+use SegWeb\Services\UserService;
+use SegWeb\Services\FileService;
 use SegWeb\Http\Controllers\Tools;
 use SegWeb\Http\Controllers\FileController;
 use SegWeb\Http\Controllers\FileResultsController;
@@ -15,103 +19,93 @@ class GithubFilesController extends Controller
 {
     private $github_files_ids = NULL;
 
+    public function __construct(protected FileService $fileService, protected UserService $userService) {}
+
     public function index()
     {
         return view('github');
     }
 
+    private function createResponse($path, $viewResponse, $apiResponse)
+    {
+        if ($path == "github") {
+            return response()->view('github', $viewResponse);
+        } else {
+            return response()->json($apiResponse)->header('Content-Type', "json");
+        }
+    }
+
     public function downloadGithub(Request $request)
     {
-        if (Tools::contains("github", $request->github_link)) {
-            $msg = ['text' => 'Repository has been successfully downloaded!', 'type' => 'success'];
-            try {
-                if (Auth::check()) {
-                    $user = Auth::user();
-                    $user_id = $user->id;
-                } else {
-                    $user_id = 0;
-                }
-                // Baixa o arquivo .zip do github
-                $github_link = substr($request->github_link, -1) == '/' ? substr_replace($request->github_link, "", -1)  : $request->github_link;
-
-                $url = $github_link . '/archive/' . $request->branch . '.zip';
-                $folder = 'github_uploads/';
-                $now = date('ymdhis');
-                $name = $folder . $now . '_' . substr($url, strrpos($url, '/') + 1);
-                $put = Storage::put($name, file_get_contents($url));
-
-                if ($put) {
-                    // Extrai e exclui o arquivo .zip do github
-                    $file_location = base_path('storage/app/' . $folder . $now . '_' . $request->branch);
-
-                    $zip = new \ZipArchive();
-                    if ($zip->open(base_path('storage/app/' . $name), \ZipArchive::CREATE) === true) {
-                        for ($i = 0; $i < $zip->numFiles; $i++) {
-                            $zip->extractTo($file_location, array($zip->getNameIndex($i)));
-                        }
-                        $zip->close();
-                    }
-
-                    unlink(base_path('storage/app/' . $name));
-
-                    // Salva o registro do repositório do github
-                    $file = new File();
-                    $file->user_id = $user_id;
-                    $file->file_path = $folder . $now . '_' . $request->branch;
-                    $project_name = explode('/', $github_link);
-                    $file->original_file_name = $project_name[sizeof($project_name) - 1];
-                    $file->type = "Github Repository";
-                    $file->save();
-
-                    // Realiza a análise dos arquivos do repositório
-                    $this->analiseGithubFiles($file_location, $file->id);
-
-                    // Busca o conteúdo dos arquivos para exibição
-                    $file_results_controller = new FileResultsController();
-                    $file_contents = NULL;
-                    if (!empty($this->github_files_ids)) {
-                        foreach ($this->github_files_ids as $value) {
-                            $file_contents[$value]['content'] = FileController::getFileContentArray($value);
-                            $file_contents[$value]['results'] = $file_results_controller->getSingleByFileId($value);
-                            $file_contents[$value]['file'] = FileController::getFileById($value);
-                        }
-                    }
-
-                    if ($request->path() == "github") {
-                        return view('github', compact(['file', 'file_contents', 'msg']));
-                    } else {
-                        header("Content-type:application/json");
-                        echo json_encode($this->getResultArray($file, $file_contents));
-                    }
-                } else {
-                    $msg['text'] = "An error occurred during repository download";
-                    $msg['type'] = "error";
-                    if ($request->path() == "github") {
-                        return view('github', compact(['msg']));
-                    } else {
-                        header("Content-type:application/json");
-                        echo json_encode(['error' => $msg['text']]);
-                    }
-                }
-            } catch (Exception $e) {
-                $msg['text'] = "An error occurred";
-                $msg['type'] = "error";
-                if ($request->path() == "github") {
-                    return view('github', compact(['msg']));
-                } else {
-                    header("Content-type:application/json");
-                    echo json_encode(['error' => $msg['text']]);
-                }
-            }
-        } else {
+        if (!Tools::contains("github", $request->github_link)) {
             $msg['text'] = "An invalid repository link has been submitted!";
             $msg['type'] = "error";
-            if ($request->path() == "github") {
-                return view('github', compact(['msg']));
-            } else {
-                header("Content-type:application/json");
-                echo json_encode(['error' => $msg['text']]);
+
+            return $this->createResponse($request->path(), compact(['msg']), ['error' => $msg['text']]);
+        }
+
+        $msg = ['text' => 'Repository has been successfully downloaded!', 'type' => 'success'];
+        try {
+            $user_id = $this->userService->getUser();
+
+
+            // Baixa o arquivo .zip do github
+            $github_link = substr($request->github_link, -1) == '/' ? substr_replace($request->github_link, "", -1)  : $request->github_link;
+
+            $url = $github_link . '/archive/' . $request->branch . '.zip';
+            $folder = 'github_uploads/';
+            $now = date('ymdhis');
+            $name = $folder . $now . '_' . substr($url, strrpos($url, '/') + 1);
+            $put = Storage::put($name, file_get_contents($url));
+
+            if (!$put) {
+                $msg['text'] = "An error occurred during repository download";
+                $msg['type'] = "error";
+
+                throw new \Exception("An error occurred during repository download", 999);
+
+                // return $this->createResponse($request->path(), compact(['msg']), ['error' => $msg['text']]);
             }
+
+            // Extrai e exclui o arquivo .zip do github
+            $file_location = base_path('storage/app/' . $folder . $now . '_' . $request->branch);
+
+            $zip = new \ZipArchive();
+            if ($zip->open(base_path('storage/app/' . $name), \ZipArchive::CREATE) === true) {
+                for ($i = 0; $i < $zip->numFiles; $i++) {
+                    $zip->extractTo($file_location, array($zip->getNameIndex($i)));
+                }
+                $zip->close();
+            }
+
+            unlink(base_path('storage/app/' . $name));
+
+            // Salva o registro do repositório do github
+            $project_name = explode('/', $github_link);
+            $project_name = $project_name[sizeof($project_name) - 1];
+
+            $file = $this->fileService->saveFile($user_id, $folder . $now . '_' . $request->branch, $project_name, "Github Repository");
+
+            // Realiza a análise dos arquivos do repositório
+            $this->analiseGithubFiles($file_location, $file->id);
+
+            // Busca o conteúdo dos arquivos para exibição
+            $file_results_controller = new FileResultsController();
+            $file_contents = NULL;
+            if (!empty($this->github_files_ids)) {
+                foreach ($this->github_files_ids as $value) {
+                    $file_contents[$value]['content'] = FileController::getFileContentArray($value);
+                    $file_contents[$value]['results'] = $file_results_controller->getSingleByFileId($value);
+                    $file_contents[$value]['file'] = FileController::getFileById($value);
+                }
+            }
+
+            return $this->createResponse($request->path(), compact(['file', 'file_contents', 'msg']), $this->getResultArray($file, $file_contents));
+        } catch (\Exception $e) {
+            $msg['text'] = $e->getCode() === 999 ? $e->getMessage() : "An error occurred";
+            $msg['type'] = "error";
+
+            return $this->createResponse($request->path(), compact(['msg']), ['error' => $msg['text']]);
         }
     }
 
