@@ -48,7 +48,6 @@ class GithubFilesController extends Controller
         try {
             $user_id = $this->userService->getUser();
 
-
             // Baixa o arquivo .zip do github
             $github_link = substr($request->github_link, -1) == '/' ? substr_replace($request->github_link, "", -1)  : $request->github_link;
 
@@ -63,8 +62,6 @@ class GithubFilesController extends Controller
                 $msg['type'] = "error";
 
                 throw new \Exception("An error occurred during repository download", 999);
-
-                // return $this->createResponse($request->path(), compact(['msg']), ['error' => $msg['text']]);
             }
 
             // Extrai e exclui o arquivo .zip do github
@@ -124,32 +121,28 @@ class GithubFilesController extends Controller
         foreach ($ffs as $ff) {
             $full_file_path = $dir . "/" . $ff;
             $file_path = explode("storage/app/", $full_file_path)[1];
-
             if (is_dir($full_file_path)) {
                 $this->analiseGithubFiles($full_file_path, $repository_id);
-                continue;
+            } else {
+                if (mime_content_type($full_file_path) == "text/x-php" || mime_content_type($full_file_path) == "application/x-php") {
+                    $user_id = $this->userService->getUser();
+
+                    $file = $this->fileService->saveFile($user_id, $file_path, $ff, "Github File", $repository_id);
+
+                    $this->github_files_ids[] = $file->id;
+
+                    $fn = fopen($full_file_path, 'r');
+                    $line_number = 1;
+                    while (!feof($fn)) {
+                        $file_line = fgets($fn);
+
+                        $this->saveFileResultsByLine($terms, $file, $file_line, $line_number);
+
+                        $line_number++;
+                    }
+                    fclose($fn);
+                }
             }
-
-            if (!mime_content_type($full_file_path) == "text/x-php" && !mime_content_type($full_file_path) == "application/x-php") {
-                continue;
-            }
-
-            $user_id = $this->userService->getUser();
-
-            $file = $this->fileService->saveFile($user_id, $file_path, $ff, "Github File", $repository_id);
-
-            $this->github_files_ids[] = $file->id;
-
-            $fn = fopen($full_file_path, 'r');
-            $line_number = 1;
-            while (!feof($fn)) {
-                $file_line = fgets($fn);
-
-                $this->saveFileResultsByLine($terms, $file, $file_line, $line_number);
-
-                $line_number++;
-            }
-            fclose($fn);
         }
     }
 
