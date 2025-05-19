@@ -115,50 +115,53 @@ class GithubFilesController extends Controller
         unset($ffs[array_search('.', $ffs, true)]);
         unset($ffs[array_search('..', $ffs, true)]);
 
-        if (!empty($ffs)) {
-            $term = new TermController();
-            $terms = $term->getTerm();
-            foreach ($ffs as $ff) {
-                $full_file_path = $dir . "/" . $ff;
-                $file_path = explode("storage/app/", $full_file_path)[1];
-                if (is_dir($full_file_path)) {
-                    $this->analiseGithubFiles($full_file_path, $repository_id);
-                } else {
-                    if (mime_content_type($full_file_path) == "text/x-php" || mime_content_type($full_file_path) == "application/x-php") {
-                        if (Auth::check()) {
-                            $user = Auth::user();
-                            $user_id = $user->id;
-                        } else {
-                            $user_id = 0;
-                        }
-                        $file = new File();
-                        $file->user_id = $user_id;
-                        $file->file_path = $file_path;
-                        $file->original_file_name = $ff;
-                        $file->type = "Github File";
-                        $file->repository_id = $repository_id;
-                        $file->save();
+        if (empty($ffs)) {
+            return;
+        }
 
-                        $this->github_files_ids[] = $file->id;
+        $term = new TermController();
+        $terms = $term->getTerm();
+        foreach ($ffs as $ff) {
+            $full_file_path = $dir . "/" . $ff;
+            $file_path = explode("storage/app/", $full_file_path)[1];
 
-                        $fn = fopen($full_file_path, 'r');
-                        $line_number = 1;
-                        while (!feof($fn)) {
-                            $file_line = fgets($fn);
-                            foreach ($terms as $term) {
-                                if (Tools::contains($term->term, $file_line)) {
-                                    $file_results = new FileResults();
-                                    $file_results->file_id = $file->id;
-                                    $file_results->line_number = $line_number;
-                                    $file_results->term_id = $term->id;
-                                    $file_results->save();
-                                }
-                            }
-                            $line_number++;
-                        }
-                        fclose($fn);
-                    }
-                }
+            if (is_dir($full_file_path)) {
+                $this->analiseGithubFiles($full_file_path, $repository_id);
+                continue;
+            }
+
+            if (!mime_content_type($full_file_path) == "text/x-php" && !mime_content_type($full_file_path) == "application/x-php") {
+                continue;
+            }
+
+            $user_id = $this->userService->getUser();
+
+            $file = $this->fileService->saveFile($user_id, $file_path, $ff, "Github File", $repository_id);
+
+            $this->github_files_ids[] = $file->id;
+
+            $fn = fopen($full_file_path, 'r');
+            $line_number = 1;
+            while (!feof($fn)) {
+                $file_line = fgets($fn);
+
+                $this->saveFileResultsByLine($terms, $file, $file_line, $line_number);
+
+                $line_number++;
+            }
+            fclose($fn);
+        }
+    }
+
+    private function saveFileResultsByLine($terms, $file, $file_line, $line_number)
+    {
+        foreach ($terms as $term) {
+            if (Tools::contains($term->term, $file_line)) {
+                $file_results = new FileResults();
+                $file_results->file_id = $file->id;
+                $file_results->line_number = $line_number;
+                $file_results->term_id = $term->id;
+                $file_results->save();
             }
         }
     }
